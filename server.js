@@ -16,11 +16,26 @@ const PORT = process.env.PORT || 3000;
 const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || Boolean(process.env.VERCEL);
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: !isVercel });
 
-// Initialize Google Authentication using credentials.json
-const auth = new google.auth.GoogleAuth({
-    keyFile: 'credentials.json',
-    scopes: ['https://www.googleapis.com/auth/spreadsheets']
-});
+// Initialize Google Authentication (Supports Vercel Env Var first, falls back to file locally)
+let auth;
+if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    try {
+        const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+        auth = google.auth.fromJSON(credentials);
+        auth.scopes = ['https://www.googleapis.com/auth/spreadsheets'];
+        console.log("Google Auth initialized via Environment Variable.");
+    } catch (err) {
+        console.error("Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON env var:", err.message);
+    }
+}
+
+if (!auth) {
+    auth = new google.auth.GoogleAuth({
+        keyFile: 'credentials.json',
+        scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    });
+    console.log("Google Auth fallback initialized via credentials.json file.");
+}
 
 // Initialize Express application
 const app = express();

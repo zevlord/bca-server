@@ -1,3 +1,5 @@
+process.env.NTBA_FIX_319 = 1;
+
 const express = require('express');
 const { TelegramBot } = require('node-telegram-bot-api'); 
 const { google } = require('googleapis');

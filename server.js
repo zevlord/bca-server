@@ -31,7 +31,265 @@ let pendingAmount = "Unknown";
 
 // Health Check Endpoints
 app.get('/healthz', (req, res) => res.status(200).send("OK"));
-app.get('/', (req, res) => res.status(200).send("BCA Auto Logger Server running on Vercel!"));
+
+app.get('/', async (req, res) => {
+    try {
+        const sheets = google.sheets({ version: 'v4', auth });
+        const sheetRes = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'Sheet1!A:D'
+        });
+
+        const rawRows = sheetRes.data.values || [];
+        // Slice last 7 rows and reverse to show latest first
+        const displayedRows = rawRows.slice(1).slice(-7).reverse();
+
+        let rowsHtml = '';
+        if (displayedRows.length === 0) {
+            rowsHtml = '<tr><td colspan="4" class="empty-state">No transaction logs found in Google Sheet.</td></tr>';
+        } else {
+            displayedRows.forEach(row => {
+                const date = row[0] || 'N/A';
+                const notes = row[1] || 'No category';
+                const amount = row[2] !== 'Unknown' ? `Rp ${Number(row[2]).toLocaleString('id-ID')}` : 'Unknown';
+                const photo = row[3] && row[3].startsWith('http') 
+                    ? `<a href="${row[3]}" target="_blank" class="link-icon">🔗</a>` 
+                    : '<span style="color: var(--text-muted);">-</span>';
+
+                rowsHtml += `
+                    <tr>
+                        <td class="mono">${date}</td>
+                        <td>${notes}</td>
+                        <td class="mono" style="font-weight: 600; color: var(--emerald);">${amount}</td>
+                        <td style="text-align: center;">${photo}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        const html = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>BCA Auto Logger Debug Monitor</title>
+            <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+            <style>
+                :root {
+                    --bg-dark: #090D16;
+                    --card-bg: #131A26;
+                    --primary-blue: #0052CC;
+                    --emerald: #10B981;
+                    --emerald-bg: rgba(16, 185, 129, 0.1);
+                    --red: #EF4444;
+                    --text-light: #F8FAFC;
+                    --text-muted: #94A3B8;
+                    --border-color: #1E293B;
+                }
+                * {
+                    box-sizing: border-box;
+                    margin: 0;
+                    padding: 0;
+                }
+                body {
+                    font-family: 'Outfit', sans-serif;
+                    background-color: var(--bg-dark);
+                    color: var(--text-light);
+                    min-height: 100vh;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    padding: 20px;
+                }
+                .container {
+                    width: 100%;
+                    max-width: 800px;
+                    background-color: var(--card-bg);
+                    border-radius: 24px;
+                    border: 1px solid var(--border-color);
+                    padding: 32px;
+                    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+                    background-image: radial-gradient(circle at 100% 0%, rgba(0, 82, 204, 0.15) 0%, transparent 50%),
+                                      radial-gradient(circle at 0% 100%, rgba(16, 185, 129, 0.08) 0%, transparent 50%);
+                }
+                .header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    border-bottom: 1px solid var(--border-color);
+                    padding-bottom: 24px;
+                    margin-bottom: 24px;
+                }
+                .logo-section h1 {
+                    font-size: 24px;
+                    font-weight: 800;
+                    letter-spacing: -0.5px;
+                    background: linear-gradient(135deg, #FFF 0%, #94A3B8 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                }
+                .logo-section p {
+                    font-size: 13px;
+                    color: var(--text-muted);
+                    margin-top: 4px;
+                }
+                .status-badge {
+                    background-color: var(--emerald-bg);
+                    color: var(--emerald);
+                    padding: 6px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    border: 1px solid rgba(16, 185, 129, 0.2);
+                }
+                .status-dot {
+                    width: 8px;
+                    height: 8px;
+                    background-color: var(--emerald);
+                    border-radius: 50%;
+                    box-shadow: 0 0 8px var(--emerald);
+                }
+                .grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 16px;
+                    margin-bottom: 32px;
+                }
+                .metric-card {
+                    background-color: rgba(30, 41, 59, 0.4);
+                    border: 1px solid var(--border-color);
+                    border-radius: 16px;
+                    padding: 16px;
+                }
+                .metric-card h3 {
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    color: var(--text-muted);
+                    margin-bottom: 8px;
+                }
+                .metric-card p {
+                    font-size: 15px;
+                    font-weight: 600;
+                }
+                .section-title {
+                    font-size: 18px;
+                    font-weight: 600;
+                    margin-bottom: 16px;
+                    color: var(--text-light);
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                .section-title span {
+                    font-size: 12px;
+                    color: var(--text-muted);
+                    font-weight: 400;
+                }
+                .table-container {
+                    border: 1px solid var(--border-color);
+                    border-radius: 16px;
+                    overflow: hidden;
+                    background-color: rgba(30, 41, 59, 0.2);
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    text-align: left;
+                    font-size: 14px;
+                }
+                th, td {
+                    padding: 14px 16px;
+                    border-bottom: 1px solid var(--border-color);
+                }
+                th {
+                    background-color: rgba(30, 41, 59, 0.4);
+                    font-weight: 600;
+                    color: var(--text-muted);
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+                tr:last-child td {
+                    border-bottom: none;
+                }
+                .mono {
+                    font-family: 'JetBrains Mono', monospace;
+                    font-size: 12px;
+                }
+                .link-icon {
+                    text-decoration: none;
+                    display: inline-flex;
+                    align-items: center;
+                    font-size: 16px;
+                }
+                .empty-state {
+                    padding: 40px;
+                    text-align: center;
+                    color: var(--text-muted);
+                    font-size: 14px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div class="logo-section">
+                        <h1>BCA Auto Logger</h1>
+                        <p>Live Cloud Debugging &amp; Status Monitor</p>
+                    </div>
+                    <div class="status-badge">
+                        <span class="status-dot"></span>
+                        <span>SYSTEM ONLINE</span>
+                    </div>
+                </div>
+
+                <div class="grid">
+                    <div class="metric-card">
+                        <h3>Server Environment</h3>
+                        <p style="color: var(--emerald);">Vercel Serverless (Active)</p>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Connected Spreadsheet</h3>
+                        <p class="mono">${SPREADSHEET_ID}</p>
+                    </div>
+                </div>
+
+                <div class="section-title">
+                    <h2>Recent Intercepted Logs</h2>
+                    <span>Displaying last 7 rows from Google Sheets</span>
+                </div>
+
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date &amp; Time</th>
+                                <th>Category / Notes</th>
+                                <th>Amount</th>
+                                <th style="text-align: center;">Receipt</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+
+        res.status(200).send(html);
+    } catch (err) {
+        console.error("Dashboard error:", err.message);
+        res.status(500).send("Dashboard Error: " + err.message);
+    }
+});
 
 // 1. Android Webhook Endpoint (Receives data from your phone)
 app.post('/api/webhook', async (req, res) => {

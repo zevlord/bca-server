@@ -351,6 +351,16 @@ async function handleTelegramMessage(msg) {
     if (msg.reply_to_message) {
         console.log("You replied to a transaction!");
         
+        // Retrieve original alert message text
+        const originalText = msg.reply_to_message.text || "";
+        
+        // Parse the amount directly from the original message (e.g., "Amount: Rp 50000")
+        let amount = "Unknown";
+        const amountMatch = originalText.match(/Amount:\s*Rp\s*([0-9.,]+)/i);
+        if (amountMatch) {
+            amount = amountMatch[1];
+        }
+
         const categoryOrNotes = msg.text || msg.caption || "No text provided";
         let fileUrl = "No Image";
 
@@ -371,7 +381,7 @@ async function handleTelegramMessage(msg) {
                 range: 'Sheet1!A:D',
                 valueInputOption: 'USER_ENTERED',
                 requestBody: {
-                    values: [[dateStr, categoryOrNotes, pendingAmount, fileUrl]]
+                    values: [[dateStr, categoryOrNotes, amount, fileUrl]]
                 }
             });
 

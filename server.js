@@ -365,6 +365,128 @@ const MONTH_NAMES_ID = [
     'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ];
 
+const DAY_NAMES_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const DAY_ROWS = { 1: 3, 2: 8, 3: 13, 4: 19, 5: 25, 6: 30, 0: 35 };
+
+function generateMonthGrid(year, monthIdx) {
+    const grid = Array.from({ length: 41 }, () => Array(20).fill(''));
+    for (let w = 0; w < 5; w++) {
+        grid[0][w * 4 + 1] = `Minggu ${w + 1}`;
+        grid[1][w * 4] = 'Hari/tanggal';
+        grid[1][w * 4 + 1] = 'Deskripsi';
+        grid[1][w * 4 + 2] = 'Harga';
+        grid[1][w * 4 + 3] = '';
+    }
+
+    const firstOfMonth = new Date(year, monthIdx, 1);
+    const firstDayOfWeek = firstOfMonth.getDay();
+    const startDate = new Date(year, monthIdx, 1);
+    if (firstDayOfWeek === 0) {
+        startDate.setDate(startDate.getDate() - 6);
+    } else if (firstDayOfWeek > 1) {
+        startDate.setDate(startDate.getDate() - (firstDayOfWeek - 1));
+    }
+
+    const curDate = new Date(startDate);
+    for (let w = 0; w < 5; w++) {
+        for (let d = 0; d < 7; d++) {
+            const dayOfWeek = curDate.getDay();
+            const dayName = DAY_NAMES_ID[dayOfWeek];
+            const dayNum = curDate.getDate();
+            const monthName = MONTH_NAMES_ID[curDate.getMonth()];
+
+            const label = `${dayName} ${dayNum} ${monthName}`;
+            const targetRow = DAY_ROWS[dayOfWeek] - 1;
+            const targetCol = w * 4;
+
+            grid[targetRow][targetCol] = label;
+            curDate.setDate(curDate.getDate() + 1);
+        }
+
+        const hargaColLetter = String.fromCharCode(65 + (w * 4 + 2));
+        grid[39][w * 4] = 'Total';
+        grid[39][w * 4 + 2] = `=SUM(${hargaColLetter}3:${hargaColLetter}39)`;
+    }
+    return grid;
+}
+
+async function ensureMonthlySheetInitialized(sheets, spreadsheetId, targetMonthName, year, monthIdx) {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    const existing = meta.data.sheets || [];
+    let matched = existing.find(s => s.properties.title.trim().toLowerCase() === targetMonthName.toLowerCase());
+    let sheetId = matched ? matched.properties.sheetId : null;
+
+    if (!matched) {
+        console.log(`Creating missing monthly tab: "${targetMonthName}"`);
+        const addRes = await sheets.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+                requests: [{ addSheet: { properties: { title: targetMonthName } } }]
+            }
+        });
+        sheetId = addRes.data.replies[0].addSheet.properties.sheetId;
+        matched = { properties: { title: targetMonthName, sheetId } };
+    }
+
+    const checkRes = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${matched.properties.title}!A1:B3`
+    });
+    if (checkRes.data.values && checkRes.data.values.length >= 3) {
+        return matched.properties.title;
+    }
+
+    console.log(`Initializing calendar layout for "${targetMonthName}"...`);
+    const grid = generateMonthGrid(year, monthIdx);
+    await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `${matched.properties.title}!A1:T41`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: grid }
+    });
+
+    try {
+        await sheets.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+                requests: [
+                    {
+                        repeatCell: {
+                            range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 0, endColumnIndex: 20 },
+                            cell: {
+                                userEnteredFormat: {
+                                    backgroundColor: { red: 0.415, green: 0.658, blue: 0.31 },
+                                    textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } },
+                                    horizontalAlignment: 'CENTER'
+                                }
+                            },
+                            fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    },
+                    {
+                        repeatCell: {
+                            range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 20 },
+                            cell: { userEnteredFormat: { textFormat: { bold: true } } },
+                            fields: 'userEnteredFormat.textFormat.bold'
+                        }
+                    },
+                    {
+                        repeatCell: {
+                            range: { sheetId, startRowIndex: 2, endRowIndex: 40, startColumnIndex: 0, endColumnIndex: 20 },
+                            cell: { userEnteredFormat: { textFormat: { bold: true } } },
+                            fields: 'userEnteredFormat.textFormat.bold'
+                        }
+                    }
+                ]
+            }
+        });
+    } catch (styleErr) {
+        console.error("Warning applying styling:", styleErr.message);
+    }
+
+    return matched.properties.title;
+}
+
 async function insertIntoMonthlySheet(sheets, spreadsheetId, category, amount, photoUrl) {
     try {
         const now = new Date();
@@ -376,12 +498,11 @@ async function insertIntoMonthlySheet(sheets, spreadsheetId, category, amount, p
 
         const targetMonthName = `${MONTH_NAMES_ID[monthIdx]} ${year}`;
 
-        const meta = await sheets.spreadsheets.get({ spreadsheetId });
-        const existingSheets = (meta.data.sheets || []).map(s => s.properties.title);
-        const matchedSheet = existingSheets.find(t => t.trim().toLowerCase() === targetMonthName.toLowerCase());
+        // Ensure tab exists and is initialized with calendar template
+        const matchedSheet = await ensureMonthlySheetInitialized(sheets, spreadsheetId, targetMonthName, year, monthIdx);
 
         if (!matchedSheet) {
-            console.log(`Monthly sheet "${targetMonthName}" not found. Skipping visual placement.`);
+            console.log(`Monthly sheet "${targetMonthName}" could not be initialized.`);
             return null;
         }
 

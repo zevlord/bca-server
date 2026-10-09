@@ -353,6 +353,17 @@ async function handleTelegramMessage(msg) {
         
         // Retrieve original alert message text
         const originalText = msg.reply_to_message.text || "";
+
+        // Prevent duplicate processing if already logged
+        if (originalText.includes("Transaction Logged ✓") || originalText.includes("Saved to Google Sheets")) {
+            await bot.sendMessage(CHAT_ID, "⚠️ This transaction has already been logged.");
+            return;
+        }
+
+        // Only process replies to genuine transaction alerts
+        if (!originalText.includes("New Transaction Detected")) {
+            return;
+        }
         
         // Parse the amount directly from the original message (e.g., "Amount: Rp 50000")
         let amount = "Unknown";
@@ -386,6 +397,21 @@ async function handleTelegramMessage(msg) {
             });
 
             console.log("Successfully saved to Sheets!");
+
+            // Mark original message as logged to prevent double-replies
+            try {
+                await bot.editMessageText(
+                    `*Transaction Logged ✓*\nAmount: Rp ${amount}\nCategory: ${categoryOrNotes}\n_Status: Saved to Google Sheets_`,
+                    {
+                        chat_id: msg.chat.id,
+                        message_id: msg.reply_to_message.message_id,
+                        parse_mode: "Markdown"
+                    }
+                );
+            } catch (editErr) {
+                console.error("Notice: Could not edit original message text:", editErr.message);
+            }
+
             bot.sendMessage(CHAT_ID, "All done! Logged to your spreadsheet.");
         } catch (error) {
             console.error("Error saving data:", error.message);

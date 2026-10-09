@@ -348,6 +348,136 @@ app.post('/api/telegram-webhook', async (req, res) => {
     }
 });
 
+// Helper to convert column index to Excel column letter
+function colToLetter(colIndex) {
+    let temp, letter = '';
+    let col = colIndex + 1;
+    while (col > 0) {
+        temp = (col - 1) % 26;
+        letter = String.fromCharCode(65 + temp) + letter;
+        col = (col - temp - 1) / 26;
+    }
+    return letter;
+}
+
+const MONTH_NAMES_ID = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+];
+
+async function insertIntoMonthlySheet(sheets, spreadsheetId, category, amount, photoUrl) {
+    try {
+        const now = new Date();
+        const jakartaDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+        const [yearStr, monthStr, dayStr] = jakartaDateStr.split("-");
+        const year = parseInt(yearStr, 10);
+        const monthIdx = parseInt(monthStr, 10) - 1;
+        const dayNum = parseInt(dayStr, 10);
+
+        const targetMonthName = `${MONTH_NAMES_ID[monthIdx]} ${year}`;
+
+        const meta = await sheets.spreadsheets.get({ spreadsheetId });
+        const existingSheets = (meta.data.sheets || []).map(s => s.properties.title);
+        const matchedSheet = existingSheets.find(t => t.trim().toLowerCase() === targetMonthName.toLowerCase());
+
+        if (!matchedSheet) {
+            console.log(`Monthly sheet "${targetMonthName}" not found. Skipping visual placement.`);
+            return null;
+        }
+
+        const res = await sheets.spreadsheets.values.get({
+            spreadsheetId,
+            range: `${matchedSheet}!A1:Z60`
+        });
+        const grid = res.data.values || [];
+        if (grid.length < 3) return null;
+
+        const headerRow = grid[1] || [];
+        const dateCols = [];
+        headerRow.forEach((cell, idx) => {
+            if (typeof cell === 'string' && /hari\s*\/\s*tanggal/i.test(cell.trim())) {
+                dateCols.push(idx);
+            }
+        });
+
+        if (dateCols.length === 0) return null;
+
+        let foundCol = -1;
+        let startRow = -1;
+        const dayRegex = new RegExp(`(^|\\s)${dayNum}(\\s|$)`, 'i');
+
+        for (const c of dateCols) {
+            for (let r = 2; r < grid.length; r++) {
+                const cellVal = grid[r] && grid[r][c] ? String(grid[r][c]).trim() : '';
+                if (cellVal && dayRegex.test(cellVal) && /^(Senin|Selasa|Rabu|Kamis|Jumat|Sabtu|Minggu)/i.test(cellVal)) {
+                    foundCol = c;
+                    startRow = r;
+                    break;
+                }
+            }
+            if (foundCol !== -1) break;
+        }
+
+        if (foundCol === -1) {
+            console.log(`Day ${dayNum} label not found in "${matchedSheet}".`);
+            return null;
+        }
+
+        let endRow = grid.length;
+        for (let r = startRow + 1; r < grid.length; r++) {
+            const dateVal = grid[r] && grid[r][foundCol] ? String(grid[r][foundCol]).trim() : '';
+            if (dateVal && (/^(Senin|Selasa|Rabu|Kamis|Jumat|Sabtu|Minggu|TOTAL)/i.test(dateVal))) {
+                endRow = r;
+                break;
+            }
+            const descVal = grid[r] && grid[r][foundCol + 1] ? String(grid[r][foundCol + 1]).trim() : '';
+            if (descVal && /^TOTAL/i.test(descVal)) {
+                endRow = r;
+                break;
+            }
+        }
+
+        let targetRow = -1;
+        for (let r = startRow; r < endRow; r++) {
+            const descVal = grid[r] && grid[r][foundCol + 1] ? String(grid[r][foundCol + 1]).trim() : '';
+            if (!descVal) {
+                targetRow = r;
+                break;
+            }
+        }
+
+        if (targetRow === -1) {
+            console.log(`All slots for day ${dayNum} are full in "${matchedSheet}".`);
+            return null;
+        }
+
+        const descColLetter = colToLetter(foundCol + 1);
+        const hargaColLetter = colToLetter(foundCol + 2);
+        const targetRange = `${matchedSheet}!${descColLetter}${targetRow + 1}:${hargaColLetter}${targetRow + 1}`;
+
+        const descCell = photoUrl && photoUrl.startsWith('http')
+            ? `=HYPERLINK("${photoUrl}", "${category}")`
+            : category;
+
+        const numAmount = parseInt(String(amount).replace(/[^0-9]/g, ""), 10) || 0;
+
+        await sheets.spreadsheets.values.update({
+            spreadsheetId,
+            range: targetRange,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [[descCell, numAmount]]
+            }
+        });
+
+        console.log(`Successfully placed in ${targetRange}`);
+        return `${matchedSheet} (${descColLetter}${targetRow + 1})`;
+    } catch (err) {
+        console.error("Error in insertIntoMonthlySheet:", err.message);
+        return null;
+    }
+}
+
 // Core Telegram Reply Handler Logic
 async function handleTelegramMessage(msg) {
     if (!msg || !msg.chat) return;
@@ -380,13 +510,14 @@ async function handleTelegramMessage(msg) {
 
         const categoryOrNotes = msg.text || msg.caption || "No text provided";
         let fileCell = "No Image";
+        let finalImageUrl = null;
 
         try {
             // Check if user attached a photo
             if (msg.photo) {
                 const photoData = msg.photo[msg.photo.length - 1]; // Gets highest quality photo
                 const telegramUrl = await bot.getFileLink(photoData.file_id);
-                let finalImageUrl = telegramUrl;
+                finalImageUrl = telegramUrl;
 
                 if (IMGBB_API_KEY) {
                     try {
@@ -428,7 +559,23 @@ async function handleTelegramMessage(msg) {
                 }
             });
 
-            console.log("Successfully saved to Sheets!");
+            console.log("Successfully saved to Raw_Transactions!");
+
+            // Attempt to insert directly into visual monthly grid (e.g. "Oktober 2026")
+            let monthlyPlacement = null;
+            try {
+                monthlyPlacement = await insertIntoMonthlySheet(
+                    sheets,
+                    SPREADSHEET_ID,
+                    categoryOrNotes,
+                    amount,
+                    finalImageUrl
+                );
+            } catch (mErr) {
+                console.error("Monthly sheet placement warning:", mErr.message);
+            }
+
+            console.log("Successfully processed transaction!");
 
             // Mark original message as logged to prevent double-replies
             try {
@@ -444,7 +591,10 @@ async function handleTelegramMessage(msg) {
                 console.error("Notice: Could not edit original message text:", editErr.message);
             }
 
-            bot.sendMessage(CHAT_ID, "All done! Logged to your spreadsheet.");
+            const successMsg = monthlyPlacement
+                ? `All done! Logged to spreadsheet (Raw + ${monthlyPlacement}).`
+                : "All done! Logged to your spreadsheet.";
+            bot.sendMessage(CHAT_ID, successMsg);
         } catch (error) {
             console.error("Error saving data:", error.message);
             bot.sendMessage(CHAT_ID, "Failed to save. Check terminal logs.");

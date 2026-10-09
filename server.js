@@ -52,7 +52,7 @@ app.get('/', async (req, res) => {
         const sheets = google.sheets({ version: 'v4', auth });
         const sheetRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Sheet1!A:D'
+            range: 'Raw_Transactions!A:D'
         });
 
         const rawRows = sheetRes.data.values || [];
@@ -378,7 +378,7 @@ async function handleTelegramMessage(msg) {
 
             await sheets.spreadsheets.values.append({
                 spreadsheetId: SPREADSHEET_ID,
-                range: 'Sheet1!A:D',
+                range: 'Raw_Transactions!A:D',
                 valueInputOption: 'USER_ENTERED',
                 requestBody: {
                     values: [[dateStr, categoryOrNotes, amount, fileUrl]]

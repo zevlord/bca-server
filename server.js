@@ -10,6 +10,7 @@ const fs = require('fs');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || 'REDACTED_BOT_TOKEN';
 const CHAT_ID = process.env.CHAT_ID || 'REDACTED_CHAT_ID';
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || 'REDACTED_SPREADSHEET_ID'; 
+const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 
 // On Vercel, serverless functions don't run background polling loops, so disable polling when process.env.VERCEL is set
@@ -67,8 +68,13 @@ app.get('/', async (req, res) => {
                 const date = row[0] || 'N/A';
                 const notes = row[1] || 'No category';
                 const amount = row[2] !== 'Unknown' ? `Rp ${Number(row[2]).toLocaleString('id-ID')}` : 'Unknown';
-                const photo = row[3] && row[3].startsWith('http') 
-                    ? `<a href="${row[3]}" target="_blank" class="link-icon">🔗</a>` 
+                let photoUrl = null;
+                if (row[3]) {
+                    const match = row[3].match(/https?:\/\/[^\s",\)]+/);
+                    if (match) photoUrl = match[0];
+                }
+                const photo = photoUrl 
+                    ? `<a href="${photoUrl}" target="_blank" class="link-icon">🔗</a>` 
                     : '<span style="color: var(--text-muted);">-</span>';
 
                 rowsHtml += `
@@ -373,14 +379,40 @@ async function handleTelegramMessage(msg) {
         }
 
         const categoryOrNotes = msg.text || msg.caption || "No text provided";
-        let fileUrl = "No Image";
+        let fileCell = "No Image";
 
         try {
-            // Check if user attached a photo (Direct Telegram URL)
+            // Check if user attached a photo
             if (msg.photo) {
                 const photoData = msg.photo[msg.photo.length - 1]; // Gets highest quality photo
-                fileUrl = await bot.getFileLink(photoData.file_id); // Direct Telegram photo URL
-                console.log("Receipt Photo Attached (Telegram URL):", fileUrl);
+                const telegramUrl = await bot.getFileLink(photoData.file_id);
+                let finalImageUrl = telegramUrl;
+
+                if (IMGBB_API_KEY) {
+                    try {
+                        const imgRes = await axios.get(telegramUrl, { responseType: 'arraybuffer' });
+                        const base64Img = Buffer.from(imgRes.data).toString('base64');
+                        const params = new URLSearchParams();
+                        params.append('image', base64Img);
+
+                        const uploadRes = await axios.post(
+                            `https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`,
+                            params
+                        );
+
+                        if (uploadRes.data?.data?.url) {
+                            finalImageUrl = uploadRes.data.data.url;
+                            console.log("Uploaded receipt to ImgBB:", finalImageUrl);
+                        }
+                    } catch (uploadErr) {
+                        console.error("ImgBB upload error, falling back to Telegram URL:", uploadErr.message);
+                    }
+                } else {
+                    console.log("IMGBB_API_KEY not configured, using Telegram URL.");
+                }
+
+                // Render thumbnail in Google Sheets cell and make it clickable to open full image
+                fileCell = `=HYPERLINK("${finalImageUrl}", IMAGE("${finalImageUrl}"))`;
             }
 
             // Append Data to Google Sheets
@@ -392,7 +424,7 @@ async function handleTelegramMessage(msg) {
                 range: 'Raw_Transactions!A:D',
                 valueInputOption: 'USER_ENTERED',
                 requestBody: {
-                    values: [[dateStr, categoryOrNotes, amount, fileUrl]]
+                    values: [[dateStr, categoryOrNotes, amount, fileCell]]
                 }
             });
 

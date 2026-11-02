@@ -45,15 +45,47 @@ app.use(express.json());
 // Store latest transaction amount temporarily for Telegram reply matching
 let pendingAmount = "Unknown";
 
+// Helper to dynamically resolve the raw transaction sheet title
+async function getRawSheetTitle(sheets, spreadsheetId) {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    const existing = meta.data.sheets || [];
+    const matched = existing.find(s => s.properties.title.trim().toLowerCase() === 'raw_transactions')
+        || existing.find(s => s.properties.title.toLowerCase().includes('raw'));
+    
+    if (matched) {
+        return matched.properties.title;
+    }
+
+    console.log("Creating missing Raw_Transactions sheet...");
+    await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+            requests: [{ addSheet: { properties: { title: 'Raw_Transactions' } } }]
+        }
+    });
+
+    await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: "'Raw_Transactions'!A1:D1",
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+            values: [['Date & Time', 'Category / Notes', 'Amount', 'Photo Link']]
+        }
+    });
+
+    return 'Raw_Transactions';
+}
+
 // Health Check Endpoints
 app.get('/healthz', (req, res) => res.status(200).send("OK"));
 
 app.get('/', async (req, res) => {
     try {
         const sheets = google.sheets({ version: 'v4', auth });
+        const rawSheetTitle = await getRawSheetTitle(sheets, SPREADSHEET_ID);
         const sheetRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Raw_Transactions!A:D'
+            range: `'${rawSheetTitle}'!A:D`
         });
 
         const rawRows = sheetRes.data.values || [];
@@ -430,7 +462,7 @@ async function ensureMonthlySheetInitialized(sheets, spreadsheetId, targetMonthN
 
     const checkRes = await sheets.spreadsheets.values.get({
         spreadsheetId,
-        range: `${matched.properties.title}!A1:B3`
+        range: `'${matched.properties.title}'!A1:B3`
     });
     if (checkRes.data.values && checkRes.data.values.length >= 3) {
         return matched.properties.title;
@@ -440,7 +472,7 @@ async function ensureMonthlySheetInitialized(sheets, spreadsheetId, targetMonthN
     const grid = generateMonthGrid(year, monthIdx);
     await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: `${matched.properties.title}!A1:T41`,
+        range: `'${matched.properties.title}'!A1:T41`,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: grid }
     });
@@ -508,7 +540,7 @@ async function insertIntoMonthlySheet(sheets, spreadsheetId, category, amount, p
 
         const res = await sheets.spreadsheets.values.get({
             spreadsheetId,
-            range: `${matchedSheet}!A1:Z60`
+            range: `'${matchedSheet}'!A1:Z60`
         });
         const grid = res.data.values || [];
         if (grid.length < 3) return null;
@@ -525,8 +557,11 @@ async function insertIntoMonthlySheet(sheets, spreadsheetId, category, amount, p
 
         let foundCol = -1;
         let startRow = -1;
-        const dayRegex = new RegExp(`(^|\\s)${dayNum}(\\s|$)`, 'i');
+        const currentMonthName = MONTH_NAMES_ID[monthIdx];
+        const dayRegex = new RegExp(`(^|\\s)${dayNum}\\s+(${currentMonthName}|${currentMonthName.substring(0, 3)})`, 'i');
+        const fallbackDayRegex = new RegExp(`(^|\\s)${dayNum}(\\s|$)`, 'i');
 
+        // Pass 1: Match day number + month name
         for (const c of dateCols) {
             for (let r = 2; r < grid.length; r++) {
                 const cellVal = grid[r] && grid[r][c] ? String(grid[r][c]).trim() : '';
@@ -537,6 +572,21 @@ async function insertIntoMonthlySheet(sheets, spreadsheetId, category, amount, p
                 }
             }
             if (foundCol !== -1) break;
+        }
+
+        // Pass 2: Fallback to day number alone
+        if (foundCol === -1) {
+            for (const c of dateCols) {
+                for (let r = 2; r < grid.length; r++) {
+                    const cellVal = grid[r] && grid[r][c] ? String(grid[r][c]).trim() : '';
+                    if (cellVal && fallbackDayRegex.test(cellVal) && /^(Senin|Selasa|Rabu|Kamis|Jumat|Sabtu|Minggu)/i.test(cellVal)) {
+                        foundCol = c;
+                        startRow = r;
+                        break;
+                    }
+                }
+                if (foundCol !== -1) break;
+            }
         }
 
         if (foundCol === -1) {
@@ -574,7 +624,7 @@ async function insertIntoMonthlySheet(sheets, spreadsheetId, category, amount, p
 
         const descColLetter = colToLetter(foundCol + 1);
         const hargaColLetter = colToLetter(foundCol + 2);
-        const targetRange = `${matchedSheet}!${descColLetter}${targetRow + 1}:${hargaColLetter}${targetRow + 1}`;
+        const targetRange = `'${matchedSheet}'!${descColLetter}${targetRow + 1}:${hargaColLetter}${targetRow + 1}`;
 
         const descCell = photoUrl && photoUrl.startsWith('http')
             ? `=HYPERLINK("${photoUrl}", "${category}")`
@@ -667,22 +717,29 @@ async function handleTelegramMessage(msg) {
                 fileCell = `=HYPERLINK("${finalImageUrl}", IMAGE("${finalImageUrl}"))`;
             }
 
-            // Append Data to Google Sheets
+            // Append Data to Google Sheets Raw Tab
             const sheets = google.sheets({ version: 'v4', auth });
             const dateStr = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
 
-            await sheets.spreadsheets.values.append({
-                spreadsheetId: SPREADSHEET_ID,
-                range: 'Raw_Transactions!A:D',
-                valueInputOption: 'USER_ENTERED',
-                requestBody: {
-                    values: [[dateStr, categoryOrNotes, amount, fileCell]]
-                }
-            });
+            let rawSaved = false;
+            let rawSheetTitle = 'Raw_Transactions';
+            try {
+                rawSheetTitle = await getRawSheetTitle(sheets, SPREADSHEET_ID);
+                await sheets.spreadsheets.values.append({
+                    spreadsheetId: SPREADSHEET_ID,
+                    range: `'${rawSheetTitle}'!A:D`,
+                    valueInputOption: 'USER_ENTERED',
+                    requestBody: {
+                        values: [[dateStr, categoryOrNotes, amount, fileCell]]
+                    }
+                });
+                rawSaved = true;
+                console.log(`Successfully saved to ${rawSheetTitle}!`);
+            } catch (rawErr) {
+                console.error("Raw sheet append error:", rawErr.message);
+            }
 
-            console.log("Successfully saved to Raw_Transactions!");
-
-            // Attempt to insert directly into visual monthly grid (e.g. "Oktober 2026")
+            // Attempt to insert directly into visual monthly grid (e.g. "November 2026")
             let monthlyPlacement = null;
             try {
                 monthlyPlacement = await insertIntoMonthlySheet(
@@ -694,6 +751,10 @@ async function handleTelegramMessage(msg) {
                 );
             } catch (mErr) {
                 console.error("Monthly sheet placement warning:", mErr.message);
+            }
+
+            if (!rawSaved && !monthlyPlacement) {
+                throw new Error("Failed to save to both raw sheet and monthly sheet.");
             }
 
             console.log("Successfully processed transaction!");

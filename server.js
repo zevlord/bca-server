@@ -13,9 +13,10 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID || 'REDACTED_SPREADSHEET_ID';
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 
-// On Vercel, serverless functions don't run background polling loops, so disable polling when process.env.VERCEL is set
+// IMPORTANT: Disable polling by default to prevent node-telegram-bot-api from clearing the production webhook
 const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || Boolean(process.env.VERCEL);
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: !isVercel });
+const enablePolling = process.env.ENABLE_POLLING === 'true';
+const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: enablePolling });
 
 // Initialize Google Authentication (Supports Vercel Env Var first, falls back to file locally)
 let auth;
@@ -478,10 +479,33 @@ async function ensureMonthlySheetInitialized(sheets, spreadsheetId, targetMonthN
     });
 
     try {
+        const solidBlack = { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } };
+        const borderRequests = [];
+        for (let w = 0; w < 5; w++) {
+            borderRequests.push({
+                updateBorders: {
+                    range: {
+                        sheetId,
+                        startRowIndex: 1, // Row 2 (headers)
+                        endRowIndex: 40,  // Row 40 (Total)
+                        startColumnIndex: w * 4,
+                        endColumnIndex: w * 4 + 3
+                    },
+                    top: solidBlack,
+                    bottom: solidBlack,
+                    left: solidBlack,
+                    right: solidBlack,
+                    innerHorizontal: solidBlack,
+                    innerVertical: solidBlack
+                }
+            });
+        }
+
         await sheets.spreadsheets.batchUpdate({
             spreadsheetId,
             requestBody: {
                 requests: [
+                    ...borderRequests,
                     {
                         repeatCell: {
                             range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 0, endColumnIndex: 20 },
@@ -784,8 +808,8 @@ async function handleTelegramMessage(msg) {
     }
 }
 
-// In local development, handle messages via polling event
-if (!isVercel) {
+// In local development, handle messages via polling event only if explicitly enabled
+if (!isVercel && enablePolling) {
     bot.on('message', async (msg) => {
         try {
             await handleTelegramMessage(msg);
@@ -796,7 +820,11 @@ if (!isVercel) {
 
     app.listen(PORT, () => {
         console.log(`Server running locally on http://localhost:${PORT}`);
-        console.log(`Telegram Bot is awake and listening...`);
+        console.log(`Telegram Bot is awake and listening via polling...`);
+    });
+} else if (!isVercel) {
+    app.listen(PORT, () => {
+        console.log(`Server running locally on http://localhost:${PORT} (Webhook mode)`);
     });
 }
 

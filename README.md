@@ -16,6 +16,8 @@ interesting part of this project is not the CRUD, it is the ingestion problem.
   <img alt="Android" src="https://img.shields.io/badge/Android-Java-3DDC84?logo=android&logoColor=white">
 </p>
 
+![BCA Auto Logger](docs/social-preview.png)
+
 ---
 
 ## Table of contents

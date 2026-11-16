@@ -237,8 +237,11 @@ The rewrite also corrected an earlier incorrect assumption about email coverage:
 receipts for QRIS *are* sent, just slowly, which is why the freshness window is
 30 minutes rather than 5. A 5-minute window silently discarded real payments.
 
-The abandoned client is kept in this repository under `BCAAutoLogger/` for
-reference. It compiles and runs; it just cannot see the events it needs.
+The abandoned client is kept in this repository under
+[`android-client/`](android-client/) for reference. It compiles and runs; it just
+cannot see the events it needs. Its `BCAListenerService` still contains the
+notification-filter logic and amount regex that would be reused by an
+`AccessibilityService` or screenshot-OCR approach.
 
 ---
 

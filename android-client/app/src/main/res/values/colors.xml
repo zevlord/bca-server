@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    
+    <!-- BCA Auto Logger Palette -->
+    <color name="bca_blue">#0052CC</color>
+    <color name="bca_blue_dark">#003899</color>
+    <color name="bca_emerald">#00875A</color>
+    <color name="bca_emerald_light">#E6F4EA</color>
+    <color name="bca_dark_bg">#0F172A</color>
+    <color name="bca_card_bg">#1E293B</color>
+
+    <!-- Status Colors -->
+    <color name="status_green">#10B981</color>
+    <color name="status_green_bg">#D1FAE5</color>
+    <color name="status_red">#EF4444</color>
+    <color name="status_red_bg">#FEE2E2</color>
+
+    <!-- Neutral Colors -->
+    <color name="text_primary">#1E293B</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="divider_color">#E2E8F0</color>
+</resources>

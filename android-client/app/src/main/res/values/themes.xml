@@ -1,0 +1,12 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Base.Theme.BCAAutoLogger" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/bca_blue</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/bca_emerald_light</item>
+        <item name="colorSecondary">@color/bca_emerald</item>
+        <item name="android:statusBarColor">@color/bca_blue_dark</item>
+    </style>
+
+    <style name="Theme.BCAAutoLogger" parent="Base.Theme.BCAAutoLogger" />
+</resources>

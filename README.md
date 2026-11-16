@@ -304,6 +304,9 @@ curl https://your-deployment.vercel.app/readyz
 # { "ready": true, "checks": { "telegram_token": true, ... } }
 ```
 
+`DASHBOARD_SECRET` is optional but the debug dashboard stays disabled without it.
+Generate one with `openssl rand -hex 16` and open `/` as `/?key=<value>`.
+
 ### 4. Register the Telegram webhook
 
 ```bash
@@ -327,7 +330,7 @@ See [`apps-script/`](apps-script/) for the Gmail polling layer and trigger setup
 | `GET` | `/readyz` | Configuration readiness as booleans. Never returns values. |
 | `POST` | `/api/webhook` | Ingestion entry point. Accepts `{amount, raw_text, package_name}`. |
 | `POST` | `/api/telegram-webhook` | Telegram update receiver. |
-| `GET` | `/` | Recent transactions dashboard. Gated by `DASHBOARD_SECRET` when set. |
+| `GET` | `/` | Recent transactions dashboard. **Disabled unless `DASHBOARD_SECRET` is set**, then requires `?key=<secret>`. |
 
 ---
 

@@ -88,9 +88,15 @@ app.get('/readyz', (req, res) => {
 });
 
 app.get('/', async (req, res) => {
-    // Optional protection: when DASHBOARD_SECRET is set, require ?key=<secret>.
-    if (config.dashboardSecret && req.query.key !== config.dashboardSecret) {
-        return res.status(401).send("Unauthorized. Append ?key=<dashboard secret> to the URL.");
+    // Deny by default: this view renders real financial data, so it stays closed
+    // until the operator explicitly configures a secret.
+    if (!config.dashboardSecret) {
+        return res
+            .status(503)
+            .send("Dashboard disabled. Set DASHBOARD_SECRET to enable it.");
+    }
+    if (req.query.key !== config.dashboardSecret) {
+        return res.status(401).send("Unauthorized.");
     }
     try {
         const sheets = google.sheets({ version: 'v4', auth });

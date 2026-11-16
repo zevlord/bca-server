@@ -4,18 +4,18 @@ const express = require('express');
 const { TelegramBot } = require('node-telegram-bot-api'); 
 const { google } = require('googleapis');
 const axios = require('axios');
-const fs = require('fs');
+const { config, readiness } = require('./config');
 
-// --- CONFIGURATION ---
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || 'REDACTED_BOT_TOKEN';
-const CHAT_ID = process.env.CHAT_ID || 'REDACTED_CHAT_ID';
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || 'REDACTED_SPREADSHEET_ID'; 
-const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '';
-const PORT = process.env.PORT || 3000;
+// --- CONFIGURATION (all values from environment, see config.js) ---
+const TELEGRAM_TOKEN = config.telegramToken;
+const CHAT_ID = config.chatId;
+const SPREADSHEET_ID = config.spreadsheetId;
+const IMGBB_API_KEY = config.imgbbApiKey;
+const PORT = config.port;
 
-// IMPORTANT: Disable polling by default to prevent node-telegram-bot-api from clearing the production webhook
-const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || Boolean(process.env.VERCEL);
-const enablePolling = process.env.ENABLE_POLLING === 'true';
+// Polling is opt-in only. See config.js for why this must never default on.
+const isVercel = config.isVercel;
+const enablePolling = config.enablePolling;
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: enablePolling });
 
 // Initialize Google Authentication (Supports Vercel Env Var first, falls back to file locally)
@@ -80,7 +80,18 @@ async function getRawSheetTitle(sheets, spreadsheetId) {
 // Health Check Endpoints
 app.get('/healthz', (req, res) => res.status(200).send("OK"));
 
+// Configuration readiness: booleans only, never values. Useful for post-deploy checks.
+app.get('/readyz', (req, res) => {
+    const status = readiness();
+    const ready = status.telegram_token && status.chat_id && status.spreadsheet_id;
+    res.status(ready ? 200 : 503).json({ ready, checks: status });
+});
+
 app.get('/', async (req, res) => {
+    // Optional protection: when DASHBOARD_SECRET is set, require ?key=<secret>.
+    if (config.dashboardSecret && req.query.key !== config.dashboardSecret) {
+        return res.status(401).send("Unauthorized. Append ?key=<dashboard secret> to the URL.");
+    }
     try {
         const sheets = google.sheets({ version: 'v4', auth });
         const rawSheetTitle = await getRawSheetTitle(sheets, SPREADSHEET_ID);

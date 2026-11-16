@@ -1,5 +1,17 @@
 node_modules/
 credentials.json
 .env
+.env.local
 *.log
 .DS_Store
+.vercel
+
+# Local debugging scratch files
+debug_*.js
+check_*.js
+find_*.js
+verify_*.js
+test_*.js
+init_*.js
+apply_*.js
+

@@ -57,7 +57,8 @@ function readiness() {
         spreadsheet_id: Boolean(config.spreadsheetId),
         imgbb: Boolean(config.imgbbApiKey),
         google_service_account: Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
-        dashboard_protected: Boolean(config.dashboardSecret),
+        // Dashboard is fail-closed: without a secret it returns 503.
+        dashboard_secret_set: Boolean(config.dashboardSecret),
         polling: config.enablePolling
     };
 }
